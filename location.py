@@ -1,6 +1,5 @@
+from copy import copy
 from typing import Tuple, Union
-
-from cv2 import exp
 
 class Location:
     def __init__(self, loc: Union[Tuple[int, int], str]) -> None:
@@ -29,3 +28,14 @@ class Location:
             raise Exception("Column must be between 0 and 7")
         if not (self.row >= 0 and self.row < 8):
             raise Exception("Row must be between 0 and 7")
+
+    def copy(self):
+        return copy(self)
+
+    def translate(self, x, y):
+        loc = self.copy()
+        try:
+            loc.update_by_col_row((loc.col + x, loc.row + y))
+            return loc
+        except:
+            return None
