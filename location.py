@@ -39,3 +39,9 @@ class Location:
             return loc
         except:
             return None
+
+    def __str__(self):
+        return self.notation
+
+    def __repr__(self):
+        return self.notation

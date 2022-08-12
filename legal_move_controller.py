@@ -1,10 +1,24 @@
-from curses.ascii import isupper
 from typing import List, Tuple
 
 from state import State, EMPTY_SPACE
 from location import Location
 
+#TODO: There is likely a better method for getting candidate translations/moves, but this will do for now
+
 KNIGHT_TRANSLATIONS = [(1, 2), (-1, 2), (1, -2), (-1, -2), (2, 1), (-2, 1), (2, -1), (-2, -1)]
+KING_TRANSLATIONS = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)]
+BISHOP_TRANSLATIONS = [
+    (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), # Northeast diagonal
+    (1, -1), (2, -2), (3, -3), (4, -4), (5, -5), (6, -6), (7, -7), # Southeast diagonal
+    (-1, -1), (-2, -2), (-3, -3), (-4, -4), (-5, -5), (-6, -6), (-7, -7), # Southwest diagonal
+    (-1, 1), (-2, 2), (-3, 3), (-4, 4), (-5, 5), (-6, 6), (-7, 7), # Northwest diagonal
+]
+ROOK_TRANSLATIONS = [
+    (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), # North
+    (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0), (7, 0), # East
+    (0, -1), (0, -2), (0, -3), (0, -4), (0, -5), (0, -6), (0, -7), # South
+    (-1, 0), (-2, 0), (-3, 0), (-4, 0), (-5, 0), (-6, 0), (-7, 0), # West
+]
 
 class LegalMoveController:
     def __init__(self):
@@ -12,16 +26,20 @@ class LegalMoveController:
 
     def getLocationsFromTranslations(self, start: Location, translations: List[Tuple]) -> List[Location]:
         moves = []
-        for x, y in KNIGHT_TRANSLATIONS:
+        for x, y in translations:
             move = start.translate(x, y)
             if move is None: continue
             moves.append(move)
         return moves
 
-    def isKingInCheck(self, state: State, player: str) -> bool:
+    def is_king_in_check(self, state: State, player: str) -> bool:
         is_white = player == "w"
         king = "K" if is_white else "k" # Which king are we looking at?
-        king_location = state.get_piece_locations(king)[0]
+        king_locations = state.get_piece_locations(king)
+        if len(king_locations) == 0: return False
+
+        king_location = king_locations[0]
+
         def same_color(piece: str, is_white: bool):
             if piece.isupper() and is_white: return True
             if piece.islower() and not is_white: return True
@@ -43,7 +61,11 @@ class LegalMoveController:
             scale += 1
             to_remove = []
             for i, (x, y) in enumerate(directions):
-                piece = state.get_piece(king_location.translate(x * scale, y * scale))
+                new_king_location = king_location.translate(x * scale, y * scale)
+                if new_king_location is None:
+                    to_remove.append(i)
+                    continue
+                piece = state.get_piece(new_king_location)
                 if piece == EMPTY_SPACE: continue
                 if same_color(piece, is_white):
                     to_remove.append(i)
@@ -58,14 +80,22 @@ class LegalMoveController:
                     if scale > 1:
                         to_remove.append(i)
                         continue
-                    else:
-                        #TODO: handle pawn checks here
-            
-            #TODO: handle removal of directions here
+                    elif piece.lower() != 'p': # This may be redundant, but just to be safe :)
+                        to_remove.append(i)
+                        continue
+                    else: # Handle pawns
+                        if (abs(x) - abs(y)) != 0: # Is not a diagonal direction?
+                            to_remove.append(i)
+                            continue
+                        # Look for black pawns in forward direction
+                        if is_white and y > 0: return True
+                        # Look for white pawns in backward direction
+                        elif is_white and y < 0: return True
+            # Remove directions that no longer need to be analyzed
+            for idx in reversed(to_remove):
+                directions.pop(idx)
 
-                
-
-        
+        return False
 
     
     def get_legal_moves(self, state: State, location: Location) -> List[Location]:
@@ -79,9 +109,86 @@ class LegalMoveController:
 
         if piece.lower() == "n":
             return self.get_legal_knight_moves(state, location)
+        if piece.lower() == "k":
+            return self.get_legal_king_moves(state, location)
+        if piece.lower() == "b":
+            return self.get_legal_bishop_moves(state, location)
+        if piece.lower() == "r":
+            return self.get_legal_rook_moves(state, location)
+        if piece.lower() == "q":
+            return self.get_legal_queen_moves(state, location)
+        if piece.lower() == "p":
+            return self.get_legal_pawn_moves(state, location)
         
         return []
 
+    def filter_capture_own_piece_moves(self, state: State, cur_loc: Location, moves: List[Location]) -> List[Location]:
+        is_white = state.get_piece(cur_loc).isupper()
+        to_remove = []
+        for i, m in enumerate(moves):
+            is_piece_white = state.get_piece(m).isupper()
+            if is_white == is_piece_white:
+                to_remove.append(i)
+        
+        for idx in reversed(to_remove):
+            moves.pop(idx)
+
+        return moves
+
+    #? Should I also do an early return if trying to move a piece that isn't the active player's turn??
+    def filter_own_king_in_check(self, state: State, loc: Location, moves: List[Location]) -> List[Location]:
+        to_remove = []
+        piece = state.get_piece(loc)
+        for i, m in enumerate(moves):
+            new_state = state.copy()
+            new_state.position[loc.row][loc.col] = EMPTY_SPACE
+            new_state.position[m.row][m.col] = piece
+            if self.is_king_in_check(new_state, state.active):
+                to_remove.append(i)
+
+        for idx in reversed(to_remove):
+            moves.pop(idx)
+        
+        return moves
+
     def get_legal_knight_moves(self, state: State, location: Location) -> List[Location]:
         moves = self.getLocationsFromTranslations(location, KNIGHT_TRANSLATIONS)
+        moves = self.filter_capture_own_piece_moves(state, location, moves)
+        moves = self.filter_own_king_in_check(state, location, moves)
+        return moves
+
+    # TODO: add castling
+    # Search state for valid castle options
+    # Search position for clearance between king and rook
+    def get_legal_king_moves(self, state: State, location: Location) -> List[Location]:
+        moves = self.getLocationsFromTranslations(location, KING_TRANSLATIONS)
+        moves = self.filter_capture_own_piece_moves(state, location, moves)
+        moves = self.filter_own_king_in_check(state, location, moves)
+        return moves
+
+    def get_legal_bishop_moves(self, state: State, location: Location) -> List[Location]:
+        moves = self.getLocationsFromTranslations(location, BISHOP_TRANSLATIONS)
+        moves = self.filter_capture_own_piece_moves(state, location, moves)
+        moves = self.filter_own_king_in_check(state, location, moves)
+        return moves
+    
+    def get_legal_rook_moves(self, state: State, location: Location) -> List[Location]:
+        moves = self.getLocationsFromTranslations(location, ROOK_TRANSLATIONS)
+        moves = self.filter_capture_own_piece_moves(state, location, moves)
+        moves = self.filter_own_king_in_check(state, location, moves)
+        return moves
+    
+    def get_legal_queen_moves(self, state: State, location: Location) -> List[Location]:
+        b_moves = self.getLocationsFromTranslations(location, BISHOP_TRANSLATIONS)
+        r_moves = self.getLocationsFromTranslations(location, BISHOP_TRANSLATIONS)
+        moves = b_moves + r_moves
+        assert len(moves) == len(set(b_moves).union(set(r_moves))), "Combined Bishop & Rook moves should not overlap"
+        moves = self.filter_capture_own_piece_moves(state, location, moves)
+        moves = self.filter_own_king_in_check(state, location, moves)
+        return moves
+
+    def get_legal_pawn_moves(self, state: State, location: Location) -> List[Location]:
+        # TODO: Pawns are bit weirder than the other pieces
+        pass
+        
         
