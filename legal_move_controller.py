@@ -157,11 +157,37 @@ class LegalMoveController:
         moves = self.filter_own_king_in_check(state, location, moves)
         return moves
 
-    # TODO: add castling
-    # Search state for valid castle options
-    # Search position for clearance between king and rook
+    def get_castling_moves(self, state: State) -> List[Location]:
+        is_white = state.active == 'w'
+        king = 'K' if is_white else 'k'
+        valid_options = []
+        for opt in state.castling:
+            if is_white and opt.isupper():
+                valid_options.append(opt.lower())
+            elif not is_white and opt.islower():
+                valid_options.append(opt)
+        if len(valid_options) == 0: return []
+        locs = state.get_piece_locations(king)
+        if len(locs) == 0: return []
+        king_location = locs[0]
+        moves = []
+        if 'k' in valid_options:
+            if state.get_piece(king_location.translate(1, 0)) == EMPTY_SPACE:
+                can_loc = king_location.translate(2, 0)
+                if state.get_piece(can_loc) == EMPTY_SPACE:
+                    moves.append(can_loc)
+        if 'q' in valid_options:
+            if state.get_piece(king_location.translate(-1, 0)) == EMPTY_SPACE:
+                if state.get_piece(king_location.translate(-2, 0)) == EMPTY_SPACE:
+                    can_loc = king_location.translate(-3, 0)
+                    if state.get_piece(can_loc) == EMPTY_SPACE:
+                        moves.append(can_loc)
+
+        return moves
+
     def get_legal_king_moves(self, state: State, location: Location) -> List[Location]:
         moves = self.getLocationsFromTranslations(location, KING_TRANSLATIONS)
+        moves.extend(self.get_castling_moves(state))
         moves = self.filter_capture_own_piece_moves(state, location, moves)
         moves = self.filter_own_king_in_check(state, location, moves)
         return moves
@@ -187,8 +213,47 @@ class LegalMoveController:
         moves = self.filter_own_king_in_check(state, location, moves)
         return moves
 
-    def get_legal_pawn_moves(self, state: State, location: Location) -> List[Location]:
-        # TODO: Pawns are bit weirder than the other pieces
-        pass
+    #TODO is there a cleaner more efficient way to do this?
+    def get_legal_pawn_moves(self, state: State, loc: Location) -> List[Location]:
+        pawn = state.get_piece[loc]
+        if pawn == EMPTY_SPACE: return []
+        is_white = pawn.isupper()
+        moves = []
+        # Get forward moves
+        direction = 1 if is_white else -1
+        can_move = state.get_piece(loc.translate(0, direction))
+        if can_move == EMPTY_SPACE:
+            moves.append(can_move)
+            can_move = state.get_piece(loc.translate(0, direction.y * 2))
+            if can_move == EMPTY_SPACE:
+                moves.append(can_move)
+
+        # Look for captures
+        can_loc = loc.translate(1, direction.y)
+        if can_loc is not None:
+            can_piece = state.get_piece(can_loc)
+            if can_piece == EMPTY_SPACE:
+                if can_loc.notation == state.en_passant:
+                    moves.append(can_loc)
+            else:
+                can_is_white = can_piece.isupper()
+                if is_white != can_is_white:
+                    moves.append(can_loc)
+
+        can_loc = loc.translate(-1, direction.y)
+        if can_loc is not None:
+            can_piece = state.get_piece(can_loc)
+            if can_piece == EMPTY_SPACE:
+                if can_loc.notation == state.en_passant:
+                    moves.append(can_loc)
+            else:
+                can_is_white = can_piece.isupper()
+                if is_white != can_is_white:
+                    moves.append(can_loc)
+
+        return moves
+
+        
+
         
         
